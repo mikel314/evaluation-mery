@@ -51,4 +51,28 @@ pip install -r requirements.txt
 ```
 
 ## Usage
-Describe how to use the project.
+
+### Run a Jupyter Notebook
+Notebooks live in the `notebooks/` folder. To open one in VS Code:
+1. Open the notebook file (e.g. [notebooks/hello_world.ipynb](notebooks/hello_world.ipynb))
+2. Click **Select Kernel** in the top-right corner
+3. Choose **Jupyter Kernel... → eval_env**
+4. Run cells with `Shift+Enter`
+
+To launch Jupyter in the browser instead:
+```bash
+conda activate eval_env
+jupyter notebook
+```
+
+---
+
+### Run from the CLI
+From the root of the project, run:
+```bash
+python3 main.py
+```
+Expected output:
+```
+Hello, World!
+```

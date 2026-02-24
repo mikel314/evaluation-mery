@@ -23,6 +23,7 @@ PROCESSED_DIR  = DATA_DIR / "processed"
 INPUTS_DIR     = Path("/mnt/c/Users/mikel/projects/Evaluacion Mery")
 TABLE_PATH     = INPUTS_DIR / "grades_v0.xlsx"
 TEMPLATE_PATH  = INPUTS_DIR / "informe 4 anys FEBRER curs 25-26.docx"
+PICTURES_DIR   = INPUTS_DIR  / "Fotos individuals"
 OUTPUT_DIR     = INPUTS_DIR / "output"
 
 

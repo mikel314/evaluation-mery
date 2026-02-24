@@ -68,11 +68,11 @@ jupyter notebook
 ---
 
 ### Run from the CLI
-From the root of the project, run:
 ```bash
+# Hello world sanity check
 python3 main.py
+
+# Generate all student reports
+python3 src/auto_eval.py
 ```
-Expected output:
-```
-Hello, World!
-```
+`auto_eval.py` reads the grades table, generates one personalised `.docx` per student and saves them to `OUTPUT_DIR` defined in `config/config.py`.

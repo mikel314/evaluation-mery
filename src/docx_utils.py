@@ -7,14 +7,21 @@ Requires: python-docx, Pillow
 
 import os
 import re
+import tempfile
+from copy import deepcopy
+from pathlib import Path
 from typing import Optional
 
+import lxml.etree as etree
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 from docx.text.paragraph import Paragraph
-from PIL import Image
+from PIL import Image, ImageOps
+
+EMU_PER_INCH = 914400
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +351,134 @@ def resize_image(image_path: str, output_path: str, width_px: int, height_px: in
         resized = img.resize((width_px, height_px), Image.LANCZOS)
         resized.save(output_path)
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Floating image
+# ---------------------------------------------------------------------------
+
+def find_student_picture(pictures_dir, student_name: str) -> Optional[str]:
+    """
+    Look inside PICTURES_DIR/<student_name>/ for a picture named PORTADA
+    (any image extension). Falls back to the first image found alphabetically.
+    Folder lookup is case-insensitive. Returns None if nothing is found.
+    """
+    pictures_root = Path(pictures_dir)
+    image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif"}
+
+    # Try exact match first, then case-insensitive
+    student_dir = pictures_root / student_name
+    if not student_dir.exists():
+        matches = [
+            d for d in pictures_root.iterdir()
+            if d.is_dir() and d.name.lower() == student_name.lower()
+        ]
+        if not matches:
+            return None
+        student_dir = matches[0]
+
+    images = sorted(
+        f for f in student_dir.iterdir()
+        if f.suffix.lower() in image_extensions
+    )
+    if not images:
+        return None
+
+    portada = next((f for f in images if f.stem.upper() == "PORTADA"), None)
+    return str(portada if portada else images[0])
+
+
+def insert_floating_image(
+    doc: Document,
+    image_path: str,
+    x_inches: float,
+    y_inches: float,
+    width_inches: float,
+    behind_text: bool = True,
+) -> None:
+    """
+    Insert an image as a floating element anchored at absolute position
+    (x_inches, y_inches) from the top-left corner of the page.
+    Width is set to width_inches; height is scaled to preserve aspect ratio.
+    behind_text=True places it behind text so the layout is not disturbed.
+
+    Strategy:
+      1. Add the image inline at the end (registers the image relationship).
+      2. Extract the <a:graphic> element (which holds the r:embed reference).
+      3. Build a <wp:anchor> with absolute-page positioning.
+      4. Inject the anchor into the first paragraph and remove the temp paragraph.
+    """
+    WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A  = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+    # Correct EXIF orientation (phone photos are often rotated in metadata only)
+    with Image.open(image_path) as img:
+        img = ImageOps.exif_transpose(img)
+        img_w, img_h = img.size
+        suffix = Path(image_path).suffix.lower() or ".jpg"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        img.save(tmp.name)
+        corrected_path = tmp.name
+
+    width_emu  = int(width_inches * EMU_PER_INCH)
+    height_emu = int(width_emu * img_h / img_w)
+    x_emu      = int(x_inches * EMU_PER_INCH)
+    y_emu      = int(y_inches * EMU_PER_INCH)
+
+    # Add inline picture so python-docx registers the image relationship
+    doc.add_picture(corrected_path, width=Inches(width_inches))
+    last_para = doc.paragraphs[-1]
+    inline = last_para._element.find(".//" + qn("wp:inline"))
+
+    # Copy the graphic element (holds the r:embed relationship ID)
+    graphic = deepcopy(inline.find(qn("a:graphic")))
+
+    # Pick a unique docPr id (must be unique across all drawings in the doc)
+    existing_ids = {
+        int(el.get("id", 0))
+        for el in doc.element.body.iter()
+        if el.tag == qn("wp:docPr")
+    }
+    doc_pr_id = max(existing_ids, default=0) + 1
+
+    # Build the anchor element
+    anchor_xml = (
+        f'<wp:anchor distT="0" distB="0" distL="0" distR="0" '
+        f'simplePos="0" relativeHeight="251658240" '
+        f'behindDoc="{"1" if behind_text else "0"}" '
+        f'locked="0" layoutInCell="1" allowOverlap="1" '
+        f'xmlns:wp="{WP}">'
+        f'  <wp:simplePos x="0" y="0"/>'
+        f'  <wp:positionH relativeFrom="page">'
+        f'    <wp:posOffset>{x_emu}</wp:posOffset>'
+        f'  </wp:positionH>'
+        f'  <wp:positionV relativeFrom="page">'
+        f'    <wp:posOffset>{y_emu}</wp:posOffset>'
+        f'  </wp:positionV>'
+        f'  <wp:extent cx="{width_emu}" cy="{height_emu}"/>'
+        f'  <wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        f'  <wp:wrapNone/>'
+        f'  <wp:docPr id="{doc_pr_id}" name="FloatImg{doc_pr_id}"/>'
+        f'  <wp:cNvGraphicFramePr>'
+        f'    <a:graphicFrameLocks xmlns:a="{A}" noChangeAspect="1"/>'
+        f'  </wp:cNvGraphicFramePr>'
+        f'</wp:anchor>'
+    )
+    anchor = etree.fromstring(anchor_xml)
+    anchor.append(graphic)
+
+    # Wrap anchor in w:r > w:drawing and inject into the first paragraph
+    run = OxmlElement("w:r")
+    drawing = OxmlElement("w:drawing")
+    drawing.append(anchor)
+    run.append(drawing)
+    doc.paragraphs[0]._element.append(run)
+
+    # Remove the temporary inline paragraph added by doc.add_picture()
+    _delete_paragraph(last_para)
+
+    # Clean up the orientation-corrected temp file
+    os.unlink(corrected_path)
 
 
 # ---------------------------------------------------------------------------

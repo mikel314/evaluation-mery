@@ -7,17 +7,21 @@ Usage:
     python src/auto_eval.py
 """
 
+import re
 import sys
 from pathlib import Path
 
 # Allow imports from project root regardless of where the script is invoked
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from config.config import TABLE_PATH, TEMPLATE_PATH, OUTPUT_DIR, PICTURES_DIR
+from config.config import (
+    TABLE_PATH, TEMPLATE_PATH, OUTPUT_DIR, PICTURES_DIR,
+    PICTURE_SPECS,
+)
 from src.xlsx_utils import get_file_info, read_sheet, get_schema
 from src.docx_utils import (
-    open_doc, save_doc, find_and_replace,
-    find_student_picture, insert_floating_image,
+    open_doc, save_doc, find_and_replace, find_in_doc,
+    find_student_pictures, insert_floating_image,
 )
 
 
@@ -37,7 +41,8 @@ def load_grades():
 
     df = read_sheet(TABLE_PATH, sheet=0)
     print(f"\nLoaded {len(df)} students, {len(df.columns)} columns")
-    print(get_schema(df).to_string(index=False))
+    #print(get_schema(df).to_string(index=False))
+    print(df['Estudiant'])
     return df
 
 
@@ -76,33 +81,56 @@ def parse_student_row(row) -> dict:
 
 def generate_report(grades: dict, template_stem: str) -> Path:
     """
-    Open the template, fill in the student name, insert the student photo
-    centred on the first page at 1/3 of the page width (floating, behind text),
-    and save the personalised report to OUTPUT_DIR.
-    Returns the path of the saved file.
+    Open the template, fill in the student name, insert up to 7 student photos
+    (whichever files are present in the student's folder) and save to OUTPUT_DIR.
+    Picture layout is fully driven by PICTURE_SPECS in config.py.
     """
     doc = open_doc(str(TEMPLATE_PATH))
 
     find_and_replace(doc, "NOM: ", f"NOM: {grades['student']}")
 
-    picture_path = find_student_picture(PICTURES_DIR, grades["student"])
-    if picture_path:
-        section    = doc.sections[0]
-        page_w     = section.page_width.inches
-        page_h     = section.page_height.inches
-        img_width  = page_w / 2
+    pictures = find_student_pictures(PICTURES_DIR, grades["student"])
+    if not pictures:
+        print(f"  [!] No pictures found for {grades['student']}")
 
-        from PIL import Image as _Image
-        with _Image.open(picture_path) as img:
-            img_w, img_h = img.size
-        img_height = img_width * img_h / img_w
+    for spec in PICTURE_SPECS:
+        pic_path = pictures.get(spec["stem"])
+        if not pic_path:
+            continue
 
-        x = (page_w - img_width)  / 2
-        y = (page_h - img_height) / 2
+        dist_kwargs = {
+            "dist_t": spec.get("dist_t", 0.0),
+            "dist_b": spec.get("dist_b", 0.0),
+            "dist_l": spec.get("dist_l", 0.0),
+            "dist_r": spec.get("dist_r", 0.0),
+        }
 
-        insert_floating_image(doc, picture_path, x_inches=x, y_inches=y, width_inches=img_width)
-    else:
-        print(f"  [!] No picture found for {grades['student']}")
+        if spec["section"] is None:
+            # PORT: absolute position on first page
+            insert_floating_image(
+                doc, pic_path,
+                x_inches=spec["x_in"],
+                y_inches=spec["y_in"],
+                width_inches=spec["width_in"],
+                wrap_type=spec["wrap_type"],
+                v_relative=spec["v_relative"],
+                **dist_kwargs,
+            )
+        else:
+            anchors = find_in_doc(doc, re.escape(spec["section"]))
+            if not anchors:
+                print(f"  [!] Section not found for {spec['stem']!r}: {spec['section']!r}")
+                continue
+            insert_floating_image(
+                doc, pic_path,
+                x_inches=spec["x_in"],
+                y_inches=spec["y_in"],
+                width_inches=spec["width_in"],
+                wrap_type=spec["wrap_type"],
+                anchor_paragraph=anchors[0],
+                v_relative=spec["v_relative"],
+                **dist_kwargs,
+            )
 
     output_path = OUTPUT_DIR / f"{template_stem}_{grades['student']}.docx"
     save_doc(doc, str(output_path))
@@ -124,7 +152,7 @@ def main():
     df = load_grades()
     print()
 
-    for _, row in df.iterrows():
+    for _, row in df[0:5].iterrows():
         grades = parse_student_row(row)
         output_path = generate_report(grades, template_stem)
         print(f"Saved: {output_path.name}")

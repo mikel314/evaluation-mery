@@ -357,35 +357,47 @@ def resize_image(image_path: str, output_path: str, width_px: int, height_px: in
 # Floating image
 # ---------------------------------------------------------------------------
 
-def find_student_picture(pictures_dir, student_name: str) -> Optional[str]:
-    """
-    Look inside PICTURES_DIR/<student_name>/ for a picture named PORTADA
-    (any image extension). Falls back to the first image found alphabetically.
-    Folder lookup is case-insensitive. Returns None if nothing is found.
-    """
+def _resolve_student_dir(pictures_dir, student_name: str) -> Optional[Path]:
+    """Return the student's picture folder (case-insensitive match). None if not found."""
     pictures_root = Path(pictures_dir)
+    student_dir = pictures_root / student_name
+    if student_dir.exists():
+        return student_dir
+    matches = [
+        d for d in pictures_root.iterdir()
+        if d.is_dir() and d.name.lower() == student_name.lower()
+    ]
+    return matches[0] if matches else None
+
+
+def find_student_picture(pictures_dir, student_name: str) -> Optional[str]:
+    """Return the PORT image for the student. Returns None if not found."""
+    pics = find_student_pictures(pictures_dir, student_name)
+    return pics.get("PORT")
+
+
+def find_student_pictures(pictures_dir, student_name: str) -> dict[str, str]:
+    """
+    Return a dict mapping uppercase filename stem → full path for every image
+    found in the student's folder.
+
+    Example:
+        {"PORT": "/path/PORT.JPG", "INTER": "/path/INTER.JPG", ...}
+
+    Only files whose stems exactly match one of the expected slots are included.
+    Returns an empty dict if the folder or images are not found.
+    """
     image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".tif"}
 
-    # Try exact match first, then case-insensitive
-    student_dir = pictures_root / student_name
-    if not student_dir.exists():
-        matches = [
-            d for d in pictures_root.iterdir()
-            if d.is_dir() and d.name.lower() == student_name.lower()
-        ]
-        if not matches:
-            return None
-        student_dir = matches[0]
+    student_dir = _resolve_student_dir(pictures_dir, student_name)
+    if not student_dir:
+        return {}
 
-    images = sorted(
-        f for f in student_dir.iterdir()
+    return {
+        f.stem.upper(): str(f)
+        for f in student_dir.iterdir()
         if f.suffix.lower() in image_extensions
-    )
-    if not images:
-        return None
-
-    portada = next((f for f in images if f.stem.upper() == "PORTADA"), None)
-    return str(portada if portada else images[0])
+    }
 
 
 def insert_floating_image(
@@ -394,20 +406,60 @@ def insert_floating_image(
     x_inches: float,
     y_inches: float,
     width_inches: float,
-    behind_text: bool = True,
+    wrap_type: str = "front",
+    anchor_paragraph: Optional[Paragraph] = None,
+    v_relative: str = "page",
+    dist_t: float = 0.0,
+    dist_b: float = 0.0,
+    dist_l: float = 0.0,
+    dist_r: float = 0.0,
 ) -> None:
     """
-    Insert an image as a floating element anchored at absolute position
-    (x_inches, y_inches) from the top-left corner of the page.
+    Insert an image as a floating element with absolute horizontal position and
+    configurable vertical reference.
     Width is set to width_inches; height is scaled to preserve aspect ratio.
-    behind_text=True places it behind text so the layout is not disturbed.
+    EXIF orientation is corrected automatically.
+
+    wrap_type — how the image interacts with text:
+      "front"      — in front of text (default)
+      "behind"     — behind text
+      "square"     — text wraps around the bounding box
+      "tight"      — text wraps tightly around the image shape
+      "top_bottom" — text above and below, not beside
+
+    anchor_paragraph — paragraph the image is embedded in.
+      If None, uses the first paragraph of the document.
+      The paragraph also controls where Word re-flows the image when the
+      document is edited.
+
+    v_relative — vertical reference frame for y_inches:
+      "page"      — y measured from the top of the page (default)
+      "paragraph" — y measured from the top of the anchor paragraph
+                    (use y_inches=0 to align the image with the paragraph)
+
+    dist_t / dist_b / dist_l / dist_r — minimum distance (in inches) between
+      the image edge and surrounding text (top, bottom, left, right).
+      Only meaningful for wrapping modes other than "front"/"behind".
 
     Strategy:
       1. Add the image inline at the end (registers the image relationship).
       2. Extract the <a:graphic> element (which holds the r:embed reference).
-      3. Build a <wp:anchor> with absolute-page positioning.
-      4. Inject the anchor into the first paragraph and remove the temp paragraph.
+      3. Build a <wp:anchor> with the requested positioning.
+      4. Inject the anchor into the target paragraph and remove the temp paragraph.
     """
+    # Map wrap_type to (behindDoc value, wrap XML element)
+    WRAP_MAP = {
+        "front":      ("0", "<wp:wrapNone/>"),
+        "behind":     ("1", "<wp:wrapNone/>"),
+        "square":     ("0", "<wp:wrapSquare wrapText='bothSides'/>"),
+        "tight":      ("0", "<wp:wrapTight wrapText='bothSides'/>"),
+        "top_bottom": ("0", "<wp:wrapTopAndBottom/>"),
+    }
+    if wrap_type not in WRAP_MAP:
+        raise ValueError(f"wrap_type must be one of {list(WRAP_MAP)}. Got: {wrap_type!r}")
+
+    behind_doc, wrap_xml = WRAP_MAP[wrap_type]
+
     WP = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
     A  = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
@@ -424,6 +476,10 @@ def insert_floating_image(
     height_emu = int(width_emu * img_h / img_w)
     x_emu      = int(x_inches * EMU_PER_INCH)
     y_emu      = int(y_inches * EMU_PER_INCH)
+    dist_t_emu = int(dist_t * EMU_PER_INCH)
+    dist_b_emu = int(dist_b * EMU_PER_INCH)
+    dist_l_emu = int(dist_l * EMU_PER_INCH)
+    dist_r_emu = int(dist_r * EMU_PER_INCH)
 
     # Add inline picture so python-docx registers the image relationship
     doc.add_picture(corrected_path, width=Inches(width_inches))
@@ -443,21 +499,21 @@ def insert_floating_image(
 
     # Build the anchor element
     anchor_xml = (
-        f'<wp:anchor distT="0" distB="0" distL="0" distR="0" '
+        f'<wp:anchor distT="{dist_t_emu}" distB="{dist_b_emu}" distL="{dist_l_emu}" distR="{dist_r_emu}" '
         f'simplePos="0" relativeHeight="251658240" '
-        f'behindDoc="{"1" if behind_text else "0"}" '
+        f'behindDoc="{behind_doc}" '
         f'locked="0" layoutInCell="1" allowOverlap="1" '
         f'xmlns:wp="{WP}">'
         f'  <wp:simplePos x="0" y="0"/>'
         f'  <wp:positionH relativeFrom="page">'
         f'    <wp:posOffset>{x_emu}</wp:posOffset>'
         f'  </wp:positionH>'
-        f'  <wp:positionV relativeFrom="page">'
+        f'  <wp:positionV relativeFrom="{v_relative}">'
         f'    <wp:posOffset>{y_emu}</wp:posOffset>'
         f'  </wp:positionV>'
         f'  <wp:extent cx="{width_emu}" cy="{height_emu}"/>'
         f'  <wp:effectExtent l="0" t="0" r="0" b="0"/>'
-        f'  <wp:wrapNone/>'
+        f'  {wrap_xml}'
         f'  <wp:docPr id="{doc_pr_id}" name="FloatImg{doc_pr_id}"/>'
         f'  <wp:cNvGraphicFramePr>'
         f'    <a:graphicFrameLocks xmlns:a="{A}" noChangeAspect="1"/>'
@@ -467,12 +523,13 @@ def insert_floating_image(
     anchor = etree.fromstring(anchor_xml)
     anchor.append(graphic)
 
-    # Wrap anchor in w:r > w:drawing and inject into the first paragraph
+    # Wrap anchor in w:r > w:drawing and inject into the target paragraph
     run = OxmlElement("w:r")
     drawing = OxmlElement("w:drawing")
     drawing.append(anchor)
     run.append(drawing)
-    doc.paragraphs[0]._element.append(run)
+    target_para = anchor_paragraph if anchor_paragraph is not None else doc.paragraphs[0]
+    target_para._element.append(run)
 
     # Remove the temporary inline paragraph added by doc.add_picture()
     _delete_paragraph(last_para)

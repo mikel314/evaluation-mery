@@ -413,6 +413,8 @@ def insert_floating_image(
     dist_b: float = 0.0,
     dist_l: float = 0.0,
     dist_r: float = 0.0,
+    border_color: Optional[str] = None,
+    border_pt: float = 1.0,
 ) -> None:
     """
     Insert an image as a floating element with absolute horizontal position and
@@ -440,6 +442,11 @@ def insert_floating_image(
     dist_t / dist_b / dist_l / dist_r — minimum distance (in inches) between
       the image edge and surrounding text (top, bottom, left, right).
       Only meaningful for wrapping modes other than "front"/"behind".
+
+    border_color — hex RGB string (e.g. "000000" for black). If None, no
+      border is drawn.
+    border_pt    — border line weight in points (only used when border_color
+      is set).
 
     Strategy:
       1. Add the image inline at the end (registers the image relationship).
@@ -488,6 +495,16 @@ def insert_floating_image(
 
     # Copy the graphic element (holds the r:embed relationship ID)
     graphic = deepcopy(inline.find(qn("a:graphic")))
+
+    # Inject picture border into <pic:spPr> if requested
+    if border_color is not None:
+        PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+        PT_TO_EMU = 12700   # 1 point = 12700 EMU
+        sp_pr = graphic.find(f".//{{{PIC}}}spPr")
+        if sp_pr is not None:
+            ln = etree.SubElement(sp_pr, f"{{{A}}}ln", w=str(int(border_pt * PT_TO_EMU)))
+            solid_fill = etree.SubElement(ln, f"{{{A}}}solidFill")
+            etree.SubElement(solid_fill, f"{{{A}}}srgbClr", val=border_color.lstrip("#"))
 
     # Pick a unique docPr id (must be unique across all drawings in the doc)
     existing_ids = {

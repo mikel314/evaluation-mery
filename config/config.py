@@ -34,15 +34,17 @@ OUTPUT_DIR     = INPUTS_DIR / "output"
 # ---------------------------------------------------------------------------
 
 # --- PORT: first-page portrait, centered, in front of text ---
-_PORT_WIDTH_IN  = 4.25          # half page width (8.5 / 2)
-_PORT_X_IN      = 2.125         # (8.5 - _PORT_WIDTH_IN) / 2
-_PORT_Y_IN      = 2.4           # from top of page
+_PORT_WIDTH_IN      = 4.25          # half page width (8.5 / 2)
+_PORT_X_IN          = 2.125         # (8.5 - _PORT_WIDTH_IN) / 2
+_PORT_Y_IN          = 2.4           # from top of page
+_PORT_BORDER_COLOR  = "000000"      # hex RGB, black
+_PORT_BORDER_PT     = 3.0           # line weight in points
 
 # --- Section pictures (PROP … HORT): right side, square wrap ---
-_SEC_WIDTH_CM   = 5.55
+_SEC_WIDTH_CM   = 5
 _SEC_WIDTH_IN   = round(_SEC_WIDTH_CM  / CM_PER_INCH, 4)   # ≈ 2.19 in
 _SEC_X_IN       = round(8.5 - 1.0 - _SEC_WIDTH_IN,  4)    # flush with right margin
-_SEC_Y_IN       = 0.0                                       # relative to anchor paragraph
+_SEC_Y_IN       = round(0.7 / CM_PER_INCH, 4)              # 0.5 cm below anchor paragraph
 _SEC_WRAP       = "square"
 
 # --- Distance from text for section pictures (inches) ---
@@ -66,13 +68,15 @@ _SEC_DIST_R     = 0.2
 # ---------------------------------------------------------------------------
 PICTURE_SPECS = [
     {
-        "stem":       "PORT",
-        "section":    None,
-        "width_in":   _PORT_WIDTH_IN,
-        "x_in":       _PORT_X_IN,
-        "y_in":       _PORT_Y_IN,
-        "wrap_type":  "front",
-        "v_relative": "page",
+        "stem":         "PORT",
+        "section":      None,
+        "width_in":     _PORT_WIDTH_IN,
+        "x_in":         _PORT_X_IN,
+        "y_in":         _PORT_Y_IN,
+        "wrap_type":    "front",
+        "v_relative":   "page",
+        "border_color": _PORT_BORDER_COLOR,
+        "border_pt":    _PORT_BORDER_PT,
     },
     {
         "stem":       "PROP",

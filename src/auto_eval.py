@@ -104,6 +104,10 @@ def generate_report(grades: dict, template_stem: str) -> Path:
             "dist_l": spec.get("dist_l", 0.0),
             "dist_r": spec.get("dist_r", 0.0),
         }
+        border_kwargs = {
+            "border_color": spec.get("border_color"),
+            "border_pt":    spec.get("border_pt", 1.0),
+        }
 
         if spec["section"] is None:
             # PORT: absolute position on first page
@@ -115,21 +119,36 @@ def generate_report(grades: dict, template_stem: str) -> Path:
                 wrap_type=spec["wrap_type"],
                 v_relative=spec["v_relative"],
                 **dist_kwargs,
+                **border_kwargs,
             )
         else:
             anchors = find_in_doc(doc, re.escape(spec["section"]))
             if not anchors:
                 print(f"  [!] Section not found for {spec['stem']!r}: {spec['section']!r}")
                 continue
+            # Anchor to the paragraph *after* the heading so the image appears
+            # below the section title rather than overlapping it.
+            all_paras = doc.paragraphs
+            heading_para = anchors[0]
+            heading_idx = next(
+                (i for i, p in enumerate(all_paras) if p._element is heading_para._element),
+                None,
+            )
+            anchor_para = (
+                all_paras[heading_idx + 1]
+                if heading_idx is not None and heading_idx + 1 < len(all_paras)
+                else heading_para
+            )
             insert_floating_image(
                 doc, pic_path,
                 x_inches=spec["x_in"],
                 y_inches=spec["y_in"],
                 width_inches=spec["width_in"],
                 wrap_type=spec["wrap_type"],
-                anchor_paragraph=anchors[0],
+                anchor_paragraph=anchor_para,
                 v_relative=spec["v_relative"],
                 **dist_kwargs,
+                **border_kwargs,
             )
 
     output_path = OUTPUT_DIR / f"{template_stem}_{grades['student']}.docx"

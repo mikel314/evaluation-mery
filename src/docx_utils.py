@@ -357,19 +357,26 @@ def resize_image(image_path: str, output_path: str, width_px: int, height_px: in
 # Section grade filtering
 # ---------------------------------------------------------------------------
 
-def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
+def apply_section_grades(
+    doc: Document,
+    section_grade_map: dict,
+    all_sections: list = None,
+) -> None:
     """
-    For each section, keep only the ##N## paragraph whose marker matches the
-    student's grade and delete all others.  The kept paragraph is cleaned:
-    the ##N## marker is stripped, bold is removed, and font colour is set to
-    black.
+    For each section that has a grade, keep only the ##N## paragraph whose
+    marker matches and delete the rest.  The kept paragraph is cleaned:
+    the ##N## marker is stripped and bold is removed.
 
-    section_grade_map: {section_title: grade_int}
-        e.g. {"ENTUSIASMAT": 2, "ACOMIADAMENT": 1, ...}
-
-    Sections not present in the map have all their ##N## paragraphs deleted.
+    section_grade_map: {section_title: grade_int} — only sections with a grade.
+    all_sections: ordered list of ALL section titles in the document.
+        Required so that sections without a grade still advance current_section,
+        preventing their ##N## paragraphs from being misattributed to an
+        adjacent section.  When a section has no grade its ##N## paragraphs
+        are left untouched.
     """
     MARKER_RE = re.compile(r'##([123])##')
+    # Track changes for every known section title, not just graded ones
+    titles_to_track = list(all_sections) if all_sections else list(section_grade_map.keys())
     current_section = None
     to_delete = []
     to_clean = []
@@ -377,10 +384,9 @@ def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
     for para in doc.paragraphs:
         text = para.text
 
-        # Detect section title (must check before looking for markers so that
-        # a heading that also happens to be on the same line as a marker gets
-        # the right section assigned first).
-        for title in section_grade_map:
+        # Detect section title — check all known titles so ungraded sections
+        # still advance current_section correctly.
+        for title in titles_to_track:
             if title in text:
                 current_section = title
                 break
@@ -389,11 +395,12 @@ def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
         if not m:
             continue
 
+        # If this section has no grade, leave all its ##N## paragraphs alone
+        if current_section not in section_grade_map:
+            continue
+
         marker_grade = int(m.group(1))
-        if (
-            current_section is not None
-            and marker_grade == section_grade_map[current_section]
-        ):
+        if marker_grade == section_grade_map[current_section]:
             to_clean.append(para)
         else:
             to_delete.append(para)

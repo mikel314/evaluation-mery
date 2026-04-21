@@ -106,7 +106,7 @@ def generate_report(grades: dict, template_stem: str) -> Path:
     if grades["cognoms"].strip():
         full_name = f"{grades['student']} {grades['cognoms'].strip()}"
     find_and_replace(doc, "NOM: ", f"NOM: {full_name}")
-    apply_section_grades(doc, grades["section_grades"])
+    apply_section_grades(doc, grades["section_grades"], all_sections=GRADE_COLUMNS)
 
     pictures = find_student_pictures(PICTURES_DIR, grades["student"])
     if not pictures:

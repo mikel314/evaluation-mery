@@ -4,10 +4,14 @@ Reads the grades table from an Excel file, generates one personalised .docx
 report per student based on a template, and saves them to the output folder.
 
 Usage:
-    python src/auto_eval.py
+    python src/auto_eval.py          # step 1 — generate .docx reports
+    python src/auto_eval.py --step 1 # same as above
+    python src/auto_eval.py --step 2 # step 2 — convert .docx reports to PDF
 """
 
+import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -22,7 +26,30 @@ from src.xlsx_utils import get_file_info, read_sheet, get_schema
 from src.docx_utils import (
     open_doc, save_doc, find_and_replace, find_in_doc,
     find_student_pictures, insert_floating_image,
+    apply_section_grades, set_document_font_color_black,
 )
+
+
+# Section columns in the grades file (order matches the template)
+GRADE_COLUMNS = [
+    "LES PROPOTES DE TREBALL",
+    "ACTIVITATS INTERNIVELL",
+    "ENDEVINALLES DELS ANIMALS",
+    "ANGLÈS",
+    "ENTUSIASMAT",
+    "PSICOMOTRICITAT I EMAT",
+    "TREBALL PER PROJECTES: HORT ESCOLAR",
+    "ACOMIADAMENT",
+]
+
+
+def _safe_grade(val):
+    """Return val as int (1/2/3) or None if missing/invalid."""
+    try:
+        v = int(float(val))
+        return v if v in (1, 2, 3) else None
+    except (TypeError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -55,23 +82,15 @@ def parse_student_row(row) -> dict:
     Unpack all columns of a DataFrame row into a named dictionary.
     Returns a dict with one key per grade category.
     """
+    section_grades = {
+        col: g
+        for col in GRADE_COLUMNS
+        if (g := _safe_grade(row.get(col))) is not None
+    }
     return {
-        # Identity
-        "student":             row["Estudiant"],
-        # Language / Writing
-        "writes_own_name":     row["Escriu el seu nom sense model"],
-        "phonics":             row["(vocals + P L M D G F C)"],
-        "copies_from_board":   row["Copia paraules de la pissarra"],
-        "dictation":           row["Realitza dictat lletra a lletra"],
-        # Reading & Communication
-        "interest_in_reading": row["Mostra interès per la lectura de literatura infantil"],
-        "oral_communication":  row["Participa en situacions de comunicació oral"],
-        # Technology
-        "use_of_devices":      row["Fa un bon us dels dispositius tecnologics (pissarra, tablet, blue-bot)"],
-        # Arts
-        "james_rizzi":         row["James Rizzi"],
-        "drawing":             row["Realitza dibuixos adequats a l'edat"],
-        "use_of_tools":        row["Utilitza correctament les diferents eines (pinzells, tisores, etc.)"],
+        "student":        row["Estudiant"],
+        "cognoms":        row.get("Cognoms", "") or "",
+        "section_grades": section_grades,
     }
 
 
@@ -87,7 +106,12 @@ def generate_report(grades: dict, template_stem: str) -> Path:
     """
     doc = open_doc(str(TEMPLATE_PATH))
 
-    find_and_replace(doc, "NOM: ", f"NOM: {grades['student']}")
+    full_name = grades["student"]
+    if grades["cognoms"].strip():
+        full_name = f"{grades['student']} {grades['cognoms'].strip()}"
+    find_and_replace(doc, "NOM: ", f"NOM: {full_name}")
+    apply_section_grades(doc, grades["section_grades"])
+    set_document_font_color_black(doc)
 
     pictures = find_student_pictures(PICTURES_DIR, grades["student"])
     if not pictures:
@@ -157,10 +181,76 @@ def generate_report(grades: dict, template_stem: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
+# PDF conversion (step 2)
+# ---------------------------------------------------------------------------
+
+def _wsl_to_windows_path(path: Path) -> str:
+    """Convert a WSL /mnt/c/... path to a Windows C:\... path."""
+    s = str(path)
+    if s.startswith("/mnt/") and len(s) > 6:
+        drive = s[5].upper()
+        rest = s[6:].replace("/", "\\")
+        return f"{drive}:{rest}"
+    return s
+
+
+def convert_reports_to_pdf() -> None:
+    """Convert every .docx in OUTPUT_DIR to PDF using Microsoft Word via PowerShell."""
+    docx_files = sorted(OUTPUT_DIR.glob("*.docx"))
+    if not docx_files:
+        print("No .docx files found in output directory.")
+        return
+
+    print(f"Output dir: {OUTPUT_DIR}")
+    print(f"Converting {len(docx_files)} file(s) to PDF using Microsoft Word...\n")
+
+    # Build a list of Windows paths and pass them to a single Word COM session
+    win_paths = [_wsl_to_windows_path(p) for p in docx_files]
+    files_array = ", ".join(f"'{p}'" for p in win_paths)
+
+    ps_script = f"""
+$word = New-Object -ComObject Word.Application
+$word.Visible = $false
+$files = @({files_array})
+foreach ($f in $files) {{
+    $pdf = [System.IO.Path]::ChangeExtension($f, '.pdf')
+    $doc = $word.Documents.Open($f)
+    $doc.SaveAs([ref]$pdf, [ref]17)
+    $doc.Close()
+    Write-Host "Converted: $(Split-Path $f -Leaf)"
+}}
+$word.Quit()
+"""
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", ps_script],
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"PowerShell exited with code {result.returncode}")
+    else:
+        print(f"\nDone — PDFs saved to {OUTPUT_DIR}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Auto-eval report generator")
+    parser.add_argument(
+        "--step",
+        type=int,
+        choices=[1, 2],
+        default=1,
+        help="1 = generate .docx reports (default)  2 = convert .docx reports to PDF",
+    )
+    args = parser.parse_args()
+
+    if args.step == 2:
+        convert_reports_to_pdf()
+        return
+
+    # Step 1 — generate .docx reports
     print(f"Table path:    {TABLE_PATH}")
     print(f"Template path: {TEMPLATE_PATH}")
     print(f"Output dir:    {OUTPUT_DIR}\n")
@@ -171,7 +261,7 @@ def main():
     df = load_grades()
     print()
 
-    for _, row in df[0:5].iterrows():
+    for _, row in df[:].iterrows():
         grades = parse_student_row(row)
         output_path = generate_report(grades, template_stem)
         print(f"Saved: {output_path.name}")

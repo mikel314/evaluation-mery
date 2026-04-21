@@ -354,6 +354,84 @@ def resize_image(image_path: str, output_path: str, width_px: int, height_px: in
 
 
 # ---------------------------------------------------------------------------
+# Section grade filtering
+# ---------------------------------------------------------------------------
+
+def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
+    """
+    For each section, keep only the ##N## paragraph whose marker matches the
+    student's grade and delete all others.  The kept paragraph is cleaned:
+    the ##N## marker is stripped, bold is removed, and font colour is set to
+    black.
+
+    section_grade_map: {section_title: grade_int}
+        e.g. {"ENTUSIASMAT": 2, "ACOMIADAMENT": 1, ...}
+
+    Sections not present in the map have all their ##N## paragraphs deleted.
+    """
+    MARKER_RE = re.compile(r'##([123])##')
+    current_section = None
+    to_delete = []
+    to_clean = []
+
+    for para in doc.paragraphs:
+        text = para.text
+
+        # Detect section title (must check before looking for markers so that
+        # a heading that also happens to be on the same line as a marker gets
+        # the right section assigned first).
+        for title in section_grade_map:
+            if title in text:
+                current_section = title
+                break
+
+        m = MARKER_RE.search(text)
+        if not m:
+            continue
+
+        marker_grade = int(m.group(1))
+        if (
+            current_section is not None
+            and marker_grade == section_grade_map[current_section]
+        ):
+            to_clean.append(para)
+        else:
+            to_delete.append(para)
+
+    for para in to_delete:
+        _delete_paragraph(para)
+
+    # Matches "##N## " at the start of the full paragraph text (may span runs)
+    PREFIX_RE = re.compile(r'^##[123]##\s*')
+
+    for para in to_clean:
+        # Remove bold and set colour on all runs first
+        for run in para.runs:
+            run.bold = False
+            run.font.color.rgb = RGBColor(0, 0, 0)
+        # Remove the marker prefix by consuming characters across runs
+        m = PREFIX_RE.match(para.text)
+        if m:
+            chars_to_remove = m.end()
+            for run in para.runs:
+                if chars_to_remove <= 0:
+                    break
+                if len(run.text) <= chars_to_remove:
+                    chars_to_remove -= len(run.text)
+                    run.text = ""
+                else:
+                    run.text = run.text[chars_to_remove:]
+                    chars_to_remove = 0
+
+
+def set_document_font_color_black(doc: Document) -> None:
+    """Set every run's font colour to black throughout the document."""
+    for para in doc.paragraphs:
+        for run in para.runs:
+            run.font.color.rgb = RGBColor(0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
 # Floating image
 # ---------------------------------------------------------------------------
 

@@ -4,14 +4,10 @@ Reads the grades table from an Excel file, generates one personalised .docx
 report per student based on a template, and saves them to the output folder.
 
 Usage:
-    python src/auto_eval.py          # step 1 — generate .docx reports
-    python src/auto_eval.py --step 1 # same as above
-    python src/auto_eval.py --step 2 # step 2 — convert .docx reports to PDF
+    python src/auto_eval.py
 """
 
-import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -26,7 +22,7 @@ from src.xlsx_utils import get_file_info, read_sheet, get_schema
 from src.docx_utils import (
     open_doc, save_doc, find_and_replace, find_in_doc,
     find_student_pictures, insert_floating_image,
-    apply_section_grades, set_document_font_color_black,
+    apply_section_grades,
 )
 
 
@@ -111,7 +107,6 @@ def generate_report(grades: dict, template_stem: str) -> Path:
         full_name = f"{grades['student']} {grades['cognoms'].strip()}"
     find_and_replace(doc, "NOM: ", f"NOM: {full_name}")
     apply_section_grades(doc, grades["section_grades"])
-    set_document_font_color_black(doc)
 
     pictures = find_student_pictures(PICTURES_DIR, grades["student"])
     if not pictures:
@@ -181,11 +176,11 @@ def generate_report(grades: dict, template_stem: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# PDF conversion (step 2)
+# Main
 # ---------------------------------------------------------------------------
 
 def _wsl_to_windows_path(path: Path) -> str:
-    """Convert a WSL /mnt/c/... path to a Windows C:\... path."""
+    """Convert a WSL /mnt/c/... path to a Windows C:\\... path."""
     s = str(path)
     if s.startswith("/mnt/") and len(s) > 6:
         drive = s[5].upper()
@@ -196,6 +191,7 @@ def _wsl_to_windows_path(path: Path) -> str:
 
 def convert_reports_to_pdf() -> None:
     """Convert every .docx in OUTPUT_DIR to PDF using Microsoft Word via PowerShell."""
+    import subprocess
     docx_files = sorted(OUTPUT_DIR.glob("*.docx"))
     if not docx_files:
         print("No .docx files found in output directory.")
@@ -204,7 +200,6 @@ def convert_reports_to_pdf() -> None:
     print(f"Output dir: {OUTPUT_DIR}")
     print(f"Converting {len(docx_files)} file(s) to PDF using Microsoft Word...\n")
 
-    # Build a list of Windows paths and pass them to a single Word COM session
     win_paths = [_wsl_to_windows_path(p) for p in docx_files]
     files_array = ", ".join(f"'{p}'" for p in win_paths)
 
@@ -231,26 +226,22 @@ $word.Quit()
         print(f"\nDone — PDFs saved to {OUTPUT_DIR}")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
 def main():
+    import argparse
     parser = argparse.ArgumentParser(description="Auto-eval report generator")
     parser.add_argument(
         "--step",
-        type=int,
-        choices=[1, 2],
-        default=1,
-        help="1 = generate .docx reports (default)  2 = convert .docx reports to PDF",
+        choices=["reports", "pdfs"],
+        default="reports",
+        help="reports = generate .docx reports (default)   pdfs = convert .docx to PDF",
     )
     args = parser.parse_args()
 
-    if args.step == 2:
+    if args.step == "pdfs":
         convert_reports_to_pdf()
         return
 
-    # Step 1 — generate .docx reports
+    # --- Step: reports ---
     print(f"Table path:    {TABLE_PATH}")
     print(f"Template path: {TEMPLATE_PATH}")
     print(f"Output dir:    {OUTPUT_DIR}\n")

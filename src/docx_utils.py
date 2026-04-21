@@ -405,10 +405,9 @@ def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
     PREFIX_RE = re.compile(r'^##[123]##\s*')
 
     for para in to_clean:
-        # Remove bold and set colour on all runs first
+        # Remove bold on all runs
         for run in para.runs:
             run.bold = False
-            run.font.color.rgb = RGBColor(0, 0, 0)
         # Remove the marker prefix by consuming characters across runs
         m = PREFIX_RE.match(para.text)
         if m:
@@ -422,13 +421,6 @@ def apply_section_grades(doc: Document, section_grade_map: dict) -> None:
                 else:
                     run.text = run.text[chars_to_remove:]
                     chars_to_remove = 0
-
-
-def set_document_font_color_black(doc: Document) -> None:
-    """Set every run's font colour to black throughout the document."""
-    for para in doc.paragraphs:
-        for run in para.runs:
-            run.font.color.rgb = RGBColor(0, 0, 0)
 
 
 # ---------------------------------------------------------------------------

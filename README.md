@@ -68,11 +68,20 @@ jupyter notebook
 ---
 
 ### Run from the CLI
-```bash
-# Hello world sanity check
-python3 main.py
 
-# Generate all student reports
-python3 src/auto_eval.py
+The report pipeline runs in two independent steps.
+
+#### Step 1 — Generate `.docx` reports
+Reads the grades Excel file, applies each student's grades to the template and saves one `.docx` per student to `OUTPUT_DIR`.
+```bash
+python3 src/auto_eval.py --step reports
 ```
-`auto_eval.py` reads the grades table, generates one personalised `.docx` per student and saves them to `OUTPUT_DIR` defined in `config/config.py`.
+
+#### Step 2 — Convert reports to PDF
+Opens the `.docx` files already in `OUTPUT_DIR` with Microsoft Word (via PowerShell) and exports each one as a `.pdf` alongside it.  
+Run this only after reviewing the `.docx` reports from Step 1.
+```bash
+python3 src/auto_eval.py --step pdfs
+```
+
+> Paths (`TABLE_PATH`, `TEMPLATE_PATH`, `OUTPUT_DIR`) are configured in `config/config.py`.

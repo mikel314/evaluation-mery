@@ -142,6 +142,7 @@ def generate_report(grades: dict, template_stem: str) -> Path:
             )
         else:
             anchors = find_in_doc(doc, re.escape(spec["section"]))
+            print(f"  Found {len(anchors)} anchor(s) for section {spec['section']!r}")
             if not anchors:
                 print(f"  [!] Section not found for {spec['stem']!r}: {spec['section']!r}")
                 continue

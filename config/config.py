@@ -156,4 +156,17 @@ PICTURE_SPECS = [
         "dist_l":     _SEC_DIST_L,
         "dist_r":     _SEC_DIST_R,
     },
+    {
+        "stem":       "ACO",
+        "section":    "ACOMIADAMENT ",
+        "width_in":   _SEC_WIDTH_IN,
+        "x_in":       _SEC_X_IN,
+        "y_in":       _SEC_Y_IN,
+        "wrap_type":  _SEC_WRAP,
+        "v_relative": "paragraph",
+        "dist_t":     _SEC_DIST_T,
+        "dist_b":     _SEC_DIST_B,
+        "dist_l":     _SEC_DIST_L,
+        "dist_r":     _SEC_DIST_R,
+    },
 ]
